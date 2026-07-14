@@ -1,6 +1,11 @@
 import asyncio
+from enum import IntEnum
 
 from core.engine import StatelessQUIC
+
+
+class PROC_ID(IntEnum):
+    TEST = 1
 
 
 async def test_procedure(payload: bytes) -> bytes:
