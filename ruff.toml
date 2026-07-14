@@ -1,0 +1,10 @@
+line-length = 88
+indent-width = 4
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[lint]
+select = ["E1", "E2", "E3", "E4", "E7", "W2"]
