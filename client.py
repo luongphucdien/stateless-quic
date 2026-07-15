@@ -20,7 +20,7 @@ class StatelessQUICClient:
             lambda: StatelessQUIC(is_server=False), local_addr=("0.0.0.0", 0)
         )
 
-    async def call(self, message: str, proc_id: int) -> bytes:
+    async def call(self, message: str, proc_id: int = 1) -> bytes:
         request_id = struct.unpack(">Q", os.urandom(8))[0]
 
         raw_payload = message.encode("utf-8")
