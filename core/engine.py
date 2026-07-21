@@ -109,6 +109,7 @@ class StatelessQUIC(asyncio.DatagramProtocol):
             true_payload = Crypto.decrypt(ciphertext, nonce, shared_secret)
         except InvalidTag:
             self._send_nack(header, addr, b"Decryption failed")
+            return
 
         if header.proc_id == PING_PROC_ID:
             response: bytes = b"PONG"

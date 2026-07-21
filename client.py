@@ -20,7 +20,10 @@ class StatelessQUICClient:
     async def start(self):
         loop = asyncio.get_running_loop()
         self.transport, self.protocol = await loop.create_datagram_endpoint(
-            lambda: StatelessQUIC(is_server=False), local_addr=("0.0.0.0", 0)
+            lambda: StatelessQUIC(
+                is_server=False, peer_public_key=self.server_public_key
+            ),
+            local_addr=("0.0.0.0", 0),
         )
 
     async def connect(

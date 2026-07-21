@@ -13,7 +13,14 @@ import unittest
 from cryptography.exceptions import InvalidTag
 
 from client import StatelessQUICClient
-from core.codec import HEADER_SIZE, PACKET_TYPE, pack_frame, unpack_frame
+from core.codec import (
+    HEADER_SIZE,
+    NONCE_SIZE,
+    PACKET_TYPE,
+    PUBLIC_KEY_SIZE,
+    pack_frame,
+    unpack_frame,
+)
 from core.crypto import Crypto
 from core.engine import StatelessQUIC
 from core.reedsolomon import ReedSolomonEngine
@@ -21,7 +28,14 @@ from core.response_cache import ResponseCache
 
 
 class TestStatelessDesign(unittest.TestCase):
+    """
+    Proves the stateless design.
+    """
+
     def test_pack_unpack(self):
+        """
+        Test frame packing/unpacking.
+        """
         frame = pack_frame(
             id=0xAAAAAAAA,
             packet_type=PACKET_TYPE.REQUEST,
@@ -39,6 +53,9 @@ class TestStatelessDesign(unittest.TestCase):
         self.assertEqual(payload, b"Test Stateless Design")
 
     def test_unordered_parse(self):
+        """
+        Test parsing unordered packets. Proves protocol does not rely on connection tracking.
+        """
         frame_a = pack_frame(1, PACKET_TYPE.REQUEST, 1, 1, b"First")
         frame_b = pack_frame(2, PACKET_TYPE.RESPONSE, 2, 1, b"Second")
         frame_c = pack_frame(3, PACKET_TYPE.RETRY, 3, 2, b"Third")
@@ -53,12 +70,24 @@ class TestStatelessDesign(unittest.TestCase):
             self.assertEqual(payload, expected_payload)
 
     def test_truncated_frame(self):
+        """
+        Test incomplete frames will be rejected.
+        """
+
         with self.assertRaises(ValueError):
             unpack_frame(b"\x00" * (HEADER_SIZE - 1))
 
 
 class TestFECReedSolomon(unittest.TestCase):
+    """
+    Proves the no retransmission, self-recovering payload.
+    """
+
     def test_reconstruction(self):
+        """
+        Test packet reconstruction.
+        """
+
         engine = ReedSolomonEngine()
         payload = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed mauris enim, mollis eu sem at, blandit malesuada ex."
         encoded = bytearray(engine.encode(payload))
@@ -71,6 +100,10 @@ class TestFECReedSolomon(unittest.TestCase):
         self.assertEqual(recovered, payload)
 
     def test_out_of_capacity(self):
+        """
+        Test packet with heavy errors will be dropped. Reed-Solomon is just the primary mechanism.
+        """
+
         engine = ReedSolomonEngine(ecc_symbols=2)
         payload = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed mauris enim, mollis eu sem at, blandit malesuada ex."
         encoded = bytearray(engine.encode(payload))
@@ -84,17 +117,33 @@ class TestFECReedSolomon(unittest.TestCase):
 
 
 class TestEphemeralState(unittest.TestCase):
+    """
+    Proves protocol does not rely on persistent connection. Instead, it relies on short-lived data.
+    """
+
     def test_caching(self):
+        """
+        Test caching capability.
+        """
+
         cache = ResponseCache()
         cache.put(request_id=42, response_frame=b"Response from cache")
         self.assertEqual(cache.get(42), b"Response from cache")
 
     def test_cache_expiry(self):
+        """
+        Test expired packets will be removed.
+        """
+
         cache = ResponseCache(ttl=0)
         cache.put(request_id=42, response_frame=b"Should be expired")
         self.assertIsNone(cache.get(42))
 
     def test_caches_capacity(self):
+        """
+        Test cache eviction for older packets when capacity is reached.
+        """
+
         cache = ResponseCache(ttl=60, max_entries=3)
 
         for i in range(5):
@@ -106,7 +155,15 @@ class TestEphemeralState(unittest.TestCase):
 
 
 class TestEncryption(unittest.TestCase):
+    """
+    Proves the usage of X25519 key exchange + AEAD encryption.
+    """
+
     def test_key_exchange(self):
+        """
+        Test key exchange step.
+        """
+
         alice_private, alice_public = Crypto.generate_keypair()
         bob_private, bob_public = Crypto.generate_keypair()
 
@@ -116,12 +173,20 @@ class TestEncryption(unittest.TestCase):
         self.assertEqual(alice_secret, bob_secret)
 
     def test_one_time_use_key(self):
+        """
+        Test generated keys for each session are unique.
+        """
+
         _, public_a = Crypto.generate_keypair()
         _, public_b = Crypto.generate_keypair()
 
         self.assertNotEqual(public_a, public_b)
 
     def test_encrypt_decrypt(self):
+        """
+        Test AEAD encryption/decryption
+        """
+
         private, public = Crypto.generate_keypair()
         peer_private, peer_public = Crypto.generate_keypair()
 
@@ -134,6 +199,10 @@ class TestEncryption(unittest.TestCase):
         self.assertEqual(plaintext, b"Test encryption")
 
     def test_tamper_protection(self):
+        """
+        Test tampered payloads will be rejected with InvalidTag exception.
+        """
+
         private, public = Crypto.generate_keypair()
         peer_private, peer_public = Crypto.generate_keypair()
 
@@ -153,8 +222,8 @@ class _RealLifeMimicProxy:
         self._real_transport = real_transport
         self._on_send = on_send
 
-    def sendto(self, payload, addr):
-        action = self._on_send(payload, addr)
+    def sendto(self, data, addr):
+        action = self._on_send(data, addr)
         if action == "drop":
             return
 
@@ -168,6 +237,10 @@ class _RealLifeMimicProxy:
 
 
 class TestRealLifeIntegration(unittest.IsolatedAsyncioTestCase):
+    """
+    Real-life-mocking integration.
+    """
+
     async def asyncSetUp(self):
         loop = asyncio.get_running_loop()
 
@@ -195,6 +268,10 @@ class TestRealLifeIntegration(unittest.IsolatedAsyncioTestCase):
         self.server_transport.close()
 
     async def test_no_rtt(self):
+        """
+        Test connection between client-server with no-RTT, no handshaking. Client receives server response after sending only one packet.
+        """
+
         sent = []
         self.client.transport = _RealLifeMimicProxy(
             self.client.transport,
@@ -207,18 +284,23 @@ class TestRealLifeIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
 
     async def test_fec_recovery(self):
+        """
+        Test packet self-recovery after artificially corrupted.
+        """
+
         sent = []
 
         def corrupt(data, addr):
             sent.append(data)
 
-            if len(sent == 1):
+            if len(sent) == 1:
                 data_as_array = bytearray(data)
 
-                data_as_array[HEADER_SIZE] ^= 0xFF
-                data_as_array[HEADER_SIZE + 1] ^= 0xFF
+                data_as_array[HEADER_SIZE + PUBLIC_KEY_SIZE + NONCE_SIZE] ^= 0xFF
+                data_as_array[HEADER_SIZE + PUBLIC_KEY_SIZE + NONCE_SIZE + 1] ^= 0xFF
 
                 return ("corrupt", bytes(data_as_array))
+
             return "send"
 
         self.client.transport = _RealLifeMimicProxy(
@@ -231,6 +313,10 @@ class TestRealLifeIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
 
     async def test_hybrid_arq_fallback(self):
+        """
+        Test hybrid ARQ fallback in case the corrupted packets are too far gone.
+        """
+
         sent = []
 
         def drop(data, addr):
@@ -245,6 +331,10 @@ class TestRealLifeIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(sent), 2)
 
     async def test_retry_from_cache(self):
+        """
+        Test packet replaying from cache instead of forcing server to resend.
+        """
+
         server_sent = []
 
         def drop(data, addr):
@@ -257,11 +347,15 @@ class TestRealLifeIntegration(unittest.IsolatedAsyncioTestCase):
 
         response = await self.client.call("Idempotent retry")
 
-        self.assertEqual(response, b"Idempotent retry")
+        self.assertEqual(response, b"ECHO: Idempotent retry")
         self.assertEqual(self.calls["n"], 1)
         self.assertGreaterEqual(len(server_sent), 2)
 
     async def test_encryption(self):
+        """
+        Test packet encryption.
+        """
+
         client_sent = []
         server_sent = []
 
@@ -288,6 +382,10 @@ class TestRealLifeIntegration(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(b"ECHO: " + plaintext_as_bytes, frame)
 
     async def test_wrong_public_key(self):
+        """
+        Test malicious actor with forged public key will never reach the server
+        """
+
         _, wrong_server_public = Crypto.generate_keypair()
 
         malicious_client = StatelessQUICClient(*self.server_addr, wrong_server_public)
