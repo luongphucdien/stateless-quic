@@ -2,6 +2,7 @@ import asyncio
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from client import StatelessQUICClient
@@ -9,6 +10,7 @@ from client import StatelessQUICClient
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 60000
 ROOT_PATH = Path(__file__).parent
+SERVER_STARTUP_TIMEOUT = 10
 
 TEST_CASES: list[str] = [
     "Test",
@@ -18,15 +20,20 @@ TEST_CASES: list[str] = [
 ]
 
 
-def _forward_output(pipe, prefix: str = "<SERVER>") -> None:
+def _forward_output(
+    pipe, ready_event: threading.Event, prefix: str = "<SERVER>"
+) -> None:
     try:
         for line in pipe:
             print(f"{prefix} {line}", end="", flush=True)
+
+            if "::READY::" in line:
+                ready_event.set()
     except Exception:
         pass
 
 
-def start_server() -> subprocess.Popen:
+def start_server(startup_timeout: float = SERVER_STARTUP_TIMEOUT) -> subprocess.Popen:
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
     server_process = subprocess.Popen(
@@ -38,22 +45,23 @@ def start_server() -> subprocess.Popen:
         creationflags=creation_flags,
     )
 
-    if server_process.poll() is not None:
-        leftover = server_process.stdout.read()
-        raise RuntimeError(
-            f"<ERR:SERVER> Server process exited early (code {server_process.returncode}).\n"
-            f"-> Output:\n{leftover}"
-        )
-    line = server_process.stdout.readline()
-    print(f"<SERVER> {line}", end="", flush=True)
-
+    ready_event = threading.Event()
     threading.Thread(
-        target=_forward_output,
-        args=(server_process.stdout),
-        daemon=True,
+        target=_forward_output, args=(server_process.stdout, ready_event), daemon=True
     ).start()
 
-    return server_process
+    startup_deadline = time.monotonic() + startup_timeout
+    while time.monotonic() < startup_deadline:
+        if server_process.poll() is not None:
+            raise RuntimeError(
+                f"<ERR:SERVER> Server process exited early (code {server_process.returncode})"
+            )
+
+        if ready_event.wait(timeout=0.1):
+            return server_process
+
+    stop_server(server_process)
+    raise RuntimeError(f"<ERR:SERVER> Server did not start within {startup_timeout}s")
 
 
 def stop_server(proc: subprocess.Popen) -> None:
@@ -74,7 +82,7 @@ def stop_server(proc: subprocess.Popen) -> None:
 
 async def run_tests() -> tuple[int, int]:
     client = StatelessQUICClient(SERVER_HOST, SERVER_PORT)
-    await client.start()
+    await client.connect()
 
     test_success = "<TEST:SUCCESS>"
     test_failed = "<TEST:FAILED>"
@@ -89,7 +97,10 @@ async def run_tests() -> tuple[int, int]:
         except Exception as exc:
             print(f"{test_failed:<7} req : {msg!r}")
             print(f"{test_failed:<7} exc : {exc}")
-    client.transport.close()
+
+    if client.transport is not None:
+        client.transport.close()
+
     return passed, len(TEST_CASES)
 
 

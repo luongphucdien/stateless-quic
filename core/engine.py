@@ -2,7 +2,7 @@ import asyncio
 import inspect
 from typing import Callable, Dict, Optional, Tuple
 
-from core.codec import PACKET_TYPE, Header, pack_frame, unpack_frame
+from core.codec import PACKET_TYPE, PING_PROC_ID, Header, pack_frame, unpack_frame
 from core.reedsolomon import ReedSolomonEngine
 from core.response_cache import ResponseCache
 
@@ -63,16 +63,19 @@ class StatelessQUIC(asyncio.DatagramProtocol):
         asyncio.create_task(self._process_rpc(header, payload, addr))
 
     async def _process_rpc(self, header: Header, payload: bytes, addr: Tuple[str, int]):
-        handler = self.procedures.get(header.proc_id)
-        if handler is None:
-            print(f"<SERVER> No handler for process {header.proc_id}")
-            return
+        if header.proc_id == PING_PROC_ID:
+            response: bytes = b"PONG"
+        else:
+            handler = self.procedures.get(header.proc_id)
+            if handler is None:
+                print(f"<SERVER> No handler for process {header.proc_id}")
+                return
 
-        response: bytes = (
-            await handler(payload)
-            if inspect.iscoroutinefunction(handler)
-            else handler(payload)
-        )
+            response: bytes = (
+                await handler(payload)
+                if inspect.iscoroutinefunction(handler)
+                else handler(payload)
+            )
 
         encoded_response = self.fec_engine.encode(response)
         response_frame = pack_frame(

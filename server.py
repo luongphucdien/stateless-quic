@@ -45,12 +45,15 @@ async def test_procedure(payload: bytes) -> bytes:
     return b"REPLY: " + payload
 
 
+procedure_mapping = {PROC_ID.TEST: test_procedure}
+
+
 def main() -> None:
     HOST = "127.0.0.1"
-    PORT = "60000"
-    server = StatelessQUICServer(HOST, PORT)
-    server.start()
+    PORT = 60000
+    server = StatelessQUICServer(HOST, PORT, procedure_mapping)
+    asyncio.run(server.start())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

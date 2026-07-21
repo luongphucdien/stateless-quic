@@ -5,6 +5,8 @@ from typing import NamedTuple, Tuple
 HEADER_FORMAT = ">Q B H H H"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
+PING_PROC_ID = 0
+
 
 class PACKET_TYPE(IntEnum):
     REQUEST = 1
