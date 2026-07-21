@@ -26,6 +26,7 @@ class StatelessQUICServer:
         self.protocol = protocol
         protocol.procedures = self.procedure_mapping
 
+        print(f"Server public key: {protocol.public_key.hex()}", flush=True)
         print(
             f"Server is ready on {self.server_addr[0]}:{self.server_addr[1]}",
             flush=True,

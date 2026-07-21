@@ -4,16 +4,18 @@ import struct
 from typing import Optional
 
 from core.codec import PING_PROC_ID, pack_frame
+from core.crypto import Crypto
 from core.engine import PACKET_TYPE, StatelessQUIC
 
 
 class StatelessQUICClient:
-    def __init__(self, server_host: str, server_port: int):
+    def __init__(self, server_host: str, server_port: int, server_public_key: bytes):
         self.server_addr = (server_host, server_port)
         self.transport = None
         self.protocol = None
         self.max_retries = 5
         self.timeout = 0.2
+        self.server_public_key = server_public_key
 
     async def start(self):
         loop = asyncio.get_running_loop()
@@ -41,19 +43,21 @@ class StatelessQUICClient:
                     break
                 delay = min(backoff_base * (2 ** (attempt - 1)), backoff_max)
                 print(
-                    f"<CLIENT_ERR> Server is not reachable. Retrying {attempt}/{max_attempts} in {delay:.1f}s..."
+                    f"<ERR:CLIENT> Server is not reachable. Retrying {attempt}/{max_attempts} in {delay:.1f}s..."
                 )
                 await asyncio.sleep(delay)
 
         raise ConnectionError(
-            f"<CLIENT_ERR> Cannot reach server at {self.server_addr}"
+            f"<ERR:CLIENT> Cannot reach server at {self.server_addr}"
         ) from last_exception
 
     async def call(self, message: str, proc_id: int = 1) -> bytes:
         request_id = struct.unpack(">Q", os.urandom(8))[0]
 
         raw_payload = message.encode("utf-8")
-        encoded_payload = self.protocol.fec_engine.encode(raw_payload)
+        ciphertext, nonce = Crypto.encrypt(raw_payload, self.protocol.shared_secret)
+        encoded_ciphertext = self.protocol.fec_engine.encode(ciphertext)
+        encoded_payload = self.protocol.public_key + nonce + encoded_ciphertext
 
         future = asyncio.get_running_loop().create_future()
         self.protocol.pending_responses[request_id] = future

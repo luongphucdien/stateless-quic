@@ -7,6 +7,9 @@ HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 PING_PROC_ID = 0
 
+PUBLIC_KEY_SIZE = 32
+NONCE_SIZE = 12
+
 
 class PACKET_TYPE(IntEnum):
     REQUEST = 1
